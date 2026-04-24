@@ -603,81 +603,22 @@ async function openTelegramChannelDetail(ch) {
   });
 }
 
-// -------- keywords / patterns under review
-$("btn-keywords").onclick = async () => {
+// -------- keywords list
+async function renderKeywordsModal() {
   const r = await fetch("/api/keywords");
   const d = await r.json();
 
-  const pollList = d.ct_poll_keywords.items
+  const pollList = (d.ct_poll_keywords?.items || [])
     .map(k => `<span class="badge low_risk" style="margin:2px 3px 2px 0">${esc(k)}</span>`).join("");
 
-  const signalList = d.betting_signals.items
-    .map(s => `
-      <tr>
-        <td style="padding:4px 10px 4px 0"><span class="badge suspicious">${esc(s.label)}</span></td>
-        <td style="padding:4px 0; color:var(--muted); font-family:var(--mono); font-size:11px">${esc(s.pattern)}</td>
-      </tr>`).join("");
-
-  const providers = d.tech_fingerprints.gambling_providers
-    .map(f => `
-      <tr>
-        <td style="padding:4px 10px 4px 0"><span class="badge high_risk">${esc(f.name)}</span></td>
-        <td style="padding:4px 0; color:var(--muted)">${esc(f.detects)}</td>
-      </tr>`).join("");
-  const payment = d.tech_fingerprints.payment
-    .map(f => `
-      <tr>
-        <td style="padding:4px 10px 4px 0"><span class="badge suspicious">${esc(f.name)}</span></td>
-        <td style="padding:4px 0; color:var(--muted)">${esc(f.detects)}</td>
-      </tr>`).join("");
-  const analytics = d.tech_fingerprints.analytics
-    .map(f => `
-      <tr>
-        <td style="padding:4px 10px 4px 0"><span class="badge low_risk">${esc(f.name)}</span></td>
-        <td style="padding:4px 0; color:var(--muted)">${esc(f.detects)}</td>
-      </tr>`).join("");
-
-  const tldRules = d.tld_rules.map(t => `
-    <div style="margin-bottom:10px; padding:8px 10px; background:#0a0f17; border:1px solid var(--border); border-radius:6px;">
-      <div><span class="badge high_risk">${esc(t.tld)}</span></div>
-      <div style="margin-top:6px; font-size:12px;"><strong style="color:var(--text)">Rule:</strong> <span style="color:var(--muted)">${esc(t.rule)}</span></div>
-      <div style="margin-top:4px; font-size:12px;"><strong style="color:var(--text)">Why:</strong> <span style="color:var(--muted)">${esc(t.rationale)}</span></div>
-    </div>`).join("");
-
-  const thresholds = Object.entries(d.score_thresholds).map(([k, v]) => `
-    <tr>
-      <td style="padding:3px 10px 3px 0"><span class="badge ${k}">${k.replace('_',' ')}</span></td>
-      <td style="padding:3px 0; color:var(--muted); font-family:var(--mono); font-size:11px">${esc(v)}</td>
-    </tr>`).join("");
-
-  $("modal-title").innerHTML = `Scanner Rules & Keywords`;
+  $("modal-title").innerHTML = `Keywords`;
   $("modal-body").innerHTML = `
-    <p style="color:var(--muted); font-size:12px; margin-top:0">
-      Everything the scanner looks for, in one place. Every tracked domain is evaluated against these patterns.
-    </p>
-
-    <h4>CT-Log Poll Keywords <span style="color:var(--muted); font-weight:normal">— queried against crt.sh every ${d.ct_poll_keywords.items ? "cycle" : ""}</span></h4>
     <div style="line-height:2">${pollList}</div>
-    <p style="color:var(--muted); font-size:11.5px; margin-top:6px">${esc(d.ct_poll_keywords.description)}</p>
-
-    <h4>Betting Signals <span style="color:var(--muted); font-weight:normal">— scanned in page text body</span></h4>
-    <table style="width:100%; font-size:12.5px"><tbody>${signalList}</tbody></table>
-    <p style="color:var(--muted); font-size:11.5px; margin-top:6px">${esc(d.betting_signals.description)}</p>
-
-    <h4>Gambling Provider Fingerprints <span style="color:var(--muted); font-weight:normal">— operator-exclusive (+55 each)</span></h4>
-    <table style="width:100%; font-size:12.5px"><tbody>${providers}</tbody></table>
-
-    <h4>Payment & Analytics Fingerprints</h4>
-    <table style="width:100%; font-size:12.5px"><tbody>${payment}${analytics}</tbody></table>
-
-    <h4>TLD Rules</h4>
-    ${tldRules}
-
-    <h4>Score Thresholds → Labels</h4>
-    <table style="width:100%; font-size:12.5px"><tbody>${thresholds}</tbody></table>
   `;
   $("modal").classList.add("show");
-};
+}
+
+$("btn-keywords").onclick = renderKeywordsModal;
 
 // -------- live logs via websocket
 function connectLogs() {

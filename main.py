@@ -455,22 +455,39 @@ async def fetch_site(domain: str, client: httpx.AsyncClient) -> Dict[str, Any]:
 
             signals = sorted(set(m.group(0).lower() for m in BETTING_SIGNAL_RE.finditer(text)))
 
-            # Tech fingerprints
+            # Collect asset URLs (script/iframe/link/img) so we can detect
+            # provider CDNs even on JS-rendered SPAs whose body text is empty.
+            # Illegal operators routinely ship a near-empty landing page that
+            # pulls game tiles from Pragmatic/Evolution/PGSoft at runtime —
+            # the provider name appears in the bundled asset URLs long before
+            # any rendered text exists.
+            asset_urls: List[str] = []
+            for tag in soup.find_all(["script", "iframe", "link", "img", "source"]):
+                for attr in ("src", "href", "data-src", "data-href"):
+                    val = tag.get(attr)
+                    if val:
+                        asset_urls.append(str(val).lower())
+            asset_blob = " ".join(asset_urls)
+
+            # Tech fingerprints — scanned across raw HTML + asset URLs.
             fingerprints = []
             lower = html.lower()
-            if "pragmatic" in lower or "pragmaticplay" in lower:
+            haystack = lower + " " + asset_blob
+            if "pragmatic" in haystack or "pragmaticplay" in haystack:
                 fingerprints.append("pragmatic-play")
-            if "evolution" in lower and ("gaming" in lower or "live" in lower):
+            if ("evolution" in haystack
+                    and ("gaming" in haystack or "live" in haystack
+                         or "evo-games" in haystack or "evolutiongaming" in haystack)):
                 fingerprints.append("evolution-gaming")
-            if "spribe" in lower or "aviator" in lower:
+            if "spribe" in haystack or "aviator" in haystack:
                 fingerprints.append("spribe-aviator")
-            if "pgsoft" in lower or "pg soft" in lower:
+            if "pgsoft" in haystack or "pg-soft" in haystack or "pg soft" in haystack:
                 fingerprints.append("pg-soft")
-            if "pix" in lower:
+            if "pix" in haystack:
                 fingerprints.append("pix-payment")
-            if "hotjar" in lower:
+            if "hotjar" in haystack:
                 fingerprints.append("hotjar")
-            if "googletagmanager" in lower:
+            if "googletagmanager" in haystack:
                 fingerprints.append("gtm")
 
             # Look for CNPJ strings
@@ -726,14 +743,82 @@ def score_risk(record: Dict[str, Any]) -> (int, str, List[str]):
             score += 10
             reasons.append("Betting-related page title")
 
+    # ---- JS-shielded operator lobby heuristic ----
+    # Illegal skins (bettigre, betboto, betchimu, bzrbet, baleiabet, barbiebet
+    # etc.) ship a near-empty landing page that boots a React/Vue SPA. The
+    # gambling games, CTA buttons, deposit UI and provider branding all load
+    # at runtime from APIs and CDNs — static HTML scans see nothing. These
+    # sites are betrayed by the combination: betting-branded domain + betting
+    # title + very small HTML + zero extracted signals/fingerprints + cloud
+    # hosting + not on the SPA whitelist. Each piece alone is weak; together
+    # it's the canonical Brazilian illegal-operator deployment signature.
+    affiliate_markers = site.get("affiliate_markers") or []
+    licensed_op_links = site.get("licensed_op_links") or []
+    content_length = int(site.get("content_length") or 0)
+    title_lower_for_skin = (site.get("title") or "").lower()
+    has_betting_title_for_skin = any(
+        k in title_lower_for_skin
+        for k in ("aposta", "bet", "jogo", "casino", "cassino", "tigre",
+                  "fortune", "aviator", "blaze", "slot")
+    )
+    has_betting_branded_domain = bool(
+        impers_hits or illegal_brand_hit or dom_tokens_hit
+    )
+    infra_blob = (
+        ((infra.get("isp") or "") + " " + (infra.get("org") or ""))
+    ).lower()
+    cloud_providers = (
+        ("amazon", "Amazon Web Services"),
+        ("aws", "Amazon Web Services"),
+        ("google", "Google Cloud"),
+        ("microsoft", "Azure"),
+        ("azure", "Azure"),
+        ("digitalocean", "DigitalOcean"),
+        ("linode", "Linode"),
+        ("ovh", "OVH"),
+        ("hetzner", "Hetzner"),
+        ("vultr", "Vultr"),
+        ("cloudflare", "Cloudflare"),
+        ("contabo", "Contabo"),
+    )
+    cloud_hit = next(
+        (label for needle, label in cloud_providers if needle in infra_blob),
+        None,
+    )
+    skin_pattern = (
+        not licensed
+        and site.get("ok")
+        and 0 < content_length < 12000
+        and not signals
+        and not fingerprints
+        and has_betting_branded_domain
+        and has_betting_title_for_skin
+        and len(affiliate_markers) == 0
+        and len(licensed_op_links) == 0
+    )
+    if skin_pattern:
+        score += 30
+        reasons.append(
+            f"Minimal homepage ({content_length}B) on a betting-branded domain "
+            f"with a betting-themed title but zero HTML-visible content, "
+            f"zero text signals and zero provider fingerprints — consistent "
+            f"with a JS-rendered operator lobby where all gambling "
+            f"functionality loads at runtime after the scanner has already "
+            f"returned (canonical illegal-skin deployment pattern)."
+        )
+        if cloud_hit:
+            score += 15
+            reasons.append(
+                f"Hosted on {cloud_hit} — cheap spin-up/teardown cloud "
+                f"infrastructure typical of throwaway illegal-skin deployments."
+            )
+
     # ---- Affiliate / tipster detection ----
     # Affiliate sites use the same vocabulary as operators and reference
     # the same brands, so the per-signal scoring naturally pushes them
     # toward high_risk. But affiliates are not themselves illegal
     # operators — they monetize by sending traffic to licensed ones.
     # Detect and cap.
-    affiliate_markers = site.get("affiliate_markers") or []
-    licensed_op_links = site.get("licensed_op_links") or []
     title_affiliate_hit = any(
         m in title_lower for m in (
             "palpite", "palpites", "prognóstico", "prognostico",
@@ -1279,13 +1364,20 @@ async def api_keywords():
             },
         ],
         "score_thresholds": {
-            "licensed":    "whitelisted → 0 (short-circuit)",
-            "high_risk":   "≥ 70",
-            "suspicious":  "40–69",
-            "low_risk":    "20–39",
-            "clean":       "< 20",
-            "unreachable": "flat 20 when homepage fetch fails",
+            "licensed":              "whitelisted → 0 (short-circuit)",
+            "high_risk":             "≥ 70",
+            "suspicious":            "40–69",
+            "potentially_affiliate": "capped at 25 when tipster / affiliate patterns detected",
+            "low_risk":              "20–39",
+            "clean":                 "< 20",
+            "unreachable":           "flat 20 when homepage fetch fails",
         },
+        "telegram_channels": {
+            "description": "Telegram channels scanned for domains mentioned in posts (link previews + inline text). Populate `config_channels` in Supabase and hit `POST /api/config/reload` to update without a restart.",
+            "items": sorted(TELEGRAM_CHANNELS),
+            "source": "supabase" if (SB and _sb_load_channels()) else "in-code default",
+        },
+        "keyword_source": "supabase" if (SB and _sb_load_keywords()) else "in-code default",
     }
 
 
@@ -1384,6 +1476,52 @@ async def api_poller_control(action: str):
         403,
         "poller control is disabled on this deployment",
     )
+
+
+@app.post("/api/config/reload")
+async def api_config_reload():
+    """Re-read keywords + Telegram channels from Supabase at runtime.
+
+    Populate the `config_keywords` and `config_channels` tables in
+    Supabase, hit this endpoint, and the running scanners will pick up
+    the new values on their next cycle without an app restart.
+    """
+    result = {
+        "keywords": {"before": len(KEYWORDS), "after": len(KEYWORDS), "source": "in-code default"},
+        "channels": {"before": len(TELEGRAM_CHANNELS), "after": len(TELEGRAM_CHANNELS), "source": "in-code default"},
+        "supabase": bool(SB),
+    }
+    if not SB:
+        await push_log("Reload config: Supabase not configured, defaults unchanged", "warn")
+        return result
+
+    sb_kws = _sb_load_keywords()
+    if sb_kws:
+        KEYWORDS[:] = sb_kws
+        result["keywords"]["after"] = len(KEYWORDS)
+        result["keywords"]["source"] = "supabase"
+        await push_log(
+            f"Reloaded {len(sb_kws)} keywords from Supabase: "
+            f"{', '.join(sb_kws[:15])}{'…' if len(sb_kws) > 15 else ''}",
+            "info",
+        )
+    else:
+        await push_log("Reload config: config_keywords empty — keeping in-memory defaults", "warn")
+
+    sb_chs = _sb_load_channels()
+    if sb_chs:
+        TELEGRAM_CHANNELS[:] = sb_chs
+        result["channels"]["after"] = len(TELEGRAM_CHANNELS)
+        result["channels"]["source"] = "supabase"
+        await push_log(
+            f"Reloaded {len(sb_chs)} Telegram channels from Supabase: "
+            f"{', '.join('@' + c for c in sb_chs[:10])}{'…' if len(sb_chs) > 10 else ''}",
+            "info",
+        )
+    else:
+        await push_log("Reload config: config_channels empty — keeping in-memory defaults", "warn")
+
+    return result
 
 
 @app.websocket("/ws/logs")
