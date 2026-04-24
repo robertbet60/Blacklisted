@@ -212,7 +212,6 @@
   </div>
   <div class="actions">
     <button id="btn-refresh">⟳ Refresh</button>
-    <button id="btn-toggle-poller">Pause Poller</button>
     <button id="btn-telegram">Telegram</button>
     <button id="btn-keywords">Keywords</button>
     <button id="btn-whitelist">Whitelist</button>
@@ -344,7 +343,6 @@ async function refreshStats() {
     $("status-text").textContent = s.running
       ? `Brazil CT-Log Monitor · ${s.tracked_domains} tracked · ${s.total_flagged} flagged`
       : "Poller paused";
-    $("btn-toggle-poller").textContent = s.running ? "Pause Poller" : "Resume Poller";
   } catch (e) {}
 }
 
@@ -483,14 +481,6 @@ $("filter-risk").addEventListener("change", refreshDomains);
 $("btn-refresh").onclick = () => { refreshStats(); refreshDomains(); toast("Refreshed"); };
 
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; }
-
-// -------- poller control
-$("btn-toggle-poller").onclick = async () => {
-  const running = !$("status-dot").classList.contains("off");
-  const action = running ? "stop" : "start";
-  await fetch("/api/poller/" + action, { method: "POST" });
-  setTimeout(refreshStats, 500);
-};
 
 // -------- whitelist
 $("btn-whitelist").onclick = async () => {

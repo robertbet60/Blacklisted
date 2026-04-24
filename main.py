@@ -23,6 +23,13 @@ from fastapi.templating import Jinja2Templates
 from fastapi import Request
 from pydantic import BaseModel
 
+# Supabase is optional — app runs fine without it (in-memory mode).
+try:
+    from supabase import create_client, Client as SupabaseClient  # type: ignore
+except ImportError:  # pragma: no cover
+    create_client = None  # type: ignore
+    SupabaseClient = None  # type: ignore
+
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
@@ -74,6 +81,109 @@ BETTING_SIGNALS = [
     r"\bevolution\s*gaming\b", r"\brolet[ae]\b", r"\bblackjack\b",
 ]
 BETTING_SIGNAL_RE = re.compile("|".join(BETTING_SIGNALS), re.IGNORECASE)
+
+# ---------------------------------------------------------------------------
+# Supabase (optional)
+# ---------------------------------------------------------------------------
+SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip()
+SUPABASE_KEY = os.getenv("SUPABASE_KEY", "").strip()
+SB: Optional["SupabaseClient"] = None
+if SUPABASE_URL and SUPABASE_KEY and create_client is not None:
+    try:
+        SB = create_client(SUPABASE_URL, SUPABASE_KEY)
+    except Exception as _e:
+        # Fall back to in-memory mode; we'll log this from push_log once ready.
+        SB = None
+        _SB_INIT_ERROR = str(_e)[:200]
+    else:
+        _SB_INIT_ERROR = None
+else:
+    _SB_INIT_ERROR = None
+
+
+def _sb_persist_domain(record: Dict[str, Any]) -> None:
+    """Best-effort upsert into `domains` + append `scan_events`. Never raises."""
+    if not SB:
+        return
+    try:
+        SB.table("domains").upsert({
+            "domain":       record["domain"],
+            "first_seen":   record["first_seen"],
+            "last_checked": record["last_checked"],
+            "source":       record.get("source"),
+            "ip":           record.get("ip"),
+            "licensed":     record.get("licensed", False),
+            "risk_score":   record.get("risk_score", 0),
+            "risk_label":   record.get("risk_label", "unknown"),
+            "reasons":      record.get("reasons") or [],
+            "infra":        record.get("infra") or {},
+            "site":         record.get("site") or {},
+            "cnpj":         record.get("cnpj"),
+        }, on_conflict="domain").execute()
+        SB.table("scan_events").insert({
+            "domain":     record["domain"],
+            "source":     record.get("source"),
+            "risk_score": record.get("risk_score"),
+            "risk_label": record.get("risk_label"),
+            "snapshot":   {
+                "reasons": record.get("reasons"),
+                "infra":   record.get("infra"),
+                "site":    record.get("site"),
+                "cnpj":    record.get("cnpj"),
+            },
+        }).execute()
+    except Exception as e:
+        # Bubble up to the log stream but don't crash the pipeline.
+        asyncio.create_task(
+            push_log(f"supabase write failed for {record['domain']}: {e}", "warn")
+        )
+
+
+def _sb_persist_whitelist(domains: set) -> None:
+    if not SB or not domains:
+        return
+    try:
+        rows = [{"domain": d} for d in sorted(domains)]
+        # Upsert in chunks to stay under PostgREST request-size limits.
+        for i in range(0, len(rows), 500):
+            SB.table("spa_whitelist").upsert(
+                rows[i:i + 500], on_conflict="domain"
+            ).execute()
+    except Exception as e:
+        asyncio.create_task(
+            push_log(f"supabase whitelist upsert failed: {e}", "warn")
+        )
+
+
+def _sb_hydrate_db() -> int:
+    """Load the most recent N domains from Supabase into the in-memory DB on startup."""
+    if not SB:
+        return 0
+    try:
+        r = SB.table("domains").select("*") \
+            .order("last_checked", desc=True).limit(2000).execute()
+        hydrated = 0
+        for row in (r.data or []):
+            DB[row["domain"]] = {
+                "domain":       row["domain"],
+                "first_seen":   row.get("first_seen"),
+                "last_checked": row.get("last_checked"),
+                "source":       row.get("source"),
+                "ip":           row.get("ip"),
+                "licensed":     row.get("licensed", False),
+                "risk_score":   row.get("risk_score", 0),
+                "risk_label":   row.get("risk_label", "unknown"),
+                "reasons":      row.get("reasons") or [],
+                "infra":        row.get("infra") or {},
+                "site":         row.get("site") or {},
+                "cnpj":         row.get("cnpj"),
+            }
+            hydrated += 1
+        return hydrated
+    except Exception as e:
+        asyncio.create_task(push_log(f"supabase hydrate failed: {e}", "warn"))
+        return 0
+
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -204,6 +314,8 @@ async def load_spa_whitelist():
         )
     except Exception as e:
         await push_log(f"SPA whitelist load failed: {e} (using seed list)", "warn")
+    # Mirror to Supabase (no-op if SB not configured).
+    _sb_persist_whitelist(SPA_WHITELIST)
 
 
 # ---------------------------------------------------------------------------
@@ -455,6 +567,7 @@ async def validate_domain(domain: str, source: str = "manual") -> Dict[str, Any]
     record["reasons"] = reasons
 
     DB[domain] = record
+    _sb_persist_domain(record)
     STATS["total_scanned"] = len(DB)
     STATS["total_flagged"] = sum(1 for r in DB.values() if r["risk_label"] in ("high_risk", "suspicious"))
     STATS["total_licensed"] = sum(1 for r in DB.values() if r["licensed"])
@@ -707,6 +820,28 @@ async def telegram_poller_loop():
 # ---------------------------------------------------------------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Supabase status line
+    if SB:
+        await push_log("Supabase persistence ENABLED", "info")
+        n = _sb_hydrate_db()
+        if n:
+            await push_log(f"Hydrated {n} domains from Supabase", "info")
+        STATS["total_scanned"] = len(DB)
+        STATS["total_flagged"] = sum(
+            1 for r in DB.values() if r["risk_label"] in ("high_risk", "suspicious")
+        )
+        STATS["total_licensed"] = sum(1 for r in DB.values() if r.get("licensed"))
+    elif _SB_INIT_ERROR:
+        await push_log(
+            f"Supabase init failed ({_SB_INIT_ERROR}) — running in-memory only",
+            "warn",
+        )
+    else:
+        await push_log(
+            "Supabase NOT configured (no SUPABASE_URL/SUPABASE_KEY) — in-memory only",
+            "info",
+        )
+
     await load_spa_whitelist()
     t_ct = asyncio.create_task(poller_loop())
     t_tg = asyncio.create_task(telegram_poller_loop())
@@ -944,15 +1079,12 @@ async def _scrape_one_now(ch: str):
 
 @app.post("/api/poller/{action}")
 async def api_poller_control(action: str):
-    if action == "stop":
-        STATS["running"] = False
-        await push_log("Poller stop requested", "warn")
-        return {"ok": True, "running": False}
-    elif action == "start":
-        if not STATS["running"]:
-            asyncio.create_task(poller_loop())
-        return {"ok": True, "running": True}
-    raise HTTPException(400, "unknown action")
+    # Poller control is disabled on the public dashboard — the scanner is
+    # designed to run 24/7. To pause/resume, ssh into the VM and restart it.
+    raise HTTPException(
+        403,
+        "poller control is disabled on this deployment",
+    )
 
 
 @app.websocket("/ws/logs")
