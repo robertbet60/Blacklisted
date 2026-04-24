@@ -64,19 +64,47 @@ create table if not exists infra_clusters (
 );
 
 -- ----------------------------------------------------------------
+-- Runtime config: keywords (crt.sh search terms)
+-- Add a row here and the scanner picks it up on next startup.
+-- If this table has ANY rows, it REPLACES the built-in defaults.
+-- If empty, the code's default keyword list is used.
+-- ----------------------------------------------------------------
+create table if not exists config_keywords (
+    keyword    text primary key,
+    note       text,
+    created_at timestamptz not null default now()
+);
+
+-- ----------------------------------------------------------------
+-- Runtime config: Telegram channels (handle without the @)
+-- Same rule as config_keywords: non-empty table REPLACES defaults.
+-- ----------------------------------------------------------------
+create table if not exists config_channels (
+    handle     text primary key,
+    note       text,
+    created_at timestamptz not null default now()
+);
+
+-- ----------------------------------------------------------------
 -- Row Level Security (public read, service_role write)
 -- ----------------------------------------------------------------
-alter table domains       enable row level security;
-alter table scan_events   enable row level security;
-alter table spa_whitelist enable row level security;
+alter table domains          enable row level security;
+alter table scan_events      enable row level security;
+alter table spa_whitelist    enable row level security;
+alter table config_keywords  enable row level security;
+alter table config_channels  enable row level security;
 
 drop policy if exists "public read domains"       on domains;
 drop policy if exists "public read scan_events"   on scan_events;
 drop policy if exists "public read whitelist"     on spa_whitelist;
+drop policy if exists "public read keywords"      on config_keywords;
+drop policy if exists "public read channels"      on config_channels;
 
-create policy "public read domains"     on domains       for select using (true);
-create policy "public read scan_events" on scan_events   for select using (true);
-create policy "public read whitelist"   on spa_whitelist for select using (true);
+create policy "public read domains"     on domains          for select using (true);
+create policy "public read scan_events" on scan_events      for select using (true);
+create policy "public read whitelist"   on spa_whitelist    for select using (true);
+create policy "public read keywords"    on config_keywords  for select using (true);
+create policy "public read channels"    on config_channels  for select using (true);
 -- Writes are done by your backend using the service_role key, which bypasses RLS.
 
 -- ----------------------------------------------------------------

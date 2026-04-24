@@ -185,6 +185,44 @@ def _sb_hydrate_db() -> int:
         return 0
 
 
+def _sb_load_keywords() -> Optional[List[str]]:
+    """Return keywords from config_keywords, or None if table is empty / not configured."""
+    if not SB:
+        return None
+    try:
+        r = SB.table("config_keywords").select("keyword").execute()
+        kws = [
+            (row.get("keyword") or "").strip().lower()
+            for row in (r.data or [])
+        ]
+        kws = [k for k in kws if k]
+        return kws if kws else None
+    except Exception as e:
+        asyncio.create_task(
+            push_log(f"supabase config_keywords read failed: {e}", "warn")
+        )
+        return None
+
+
+def _sb_load_channels() -> Optional[List[str]]:
+    """Return channel handles from config_channels, or None if empty / not configured."""
+    if not SB:
+        return None
+    try:
+        r = SB.table("config_channels").select("handle").execute()
+        chs = [
+            (row.get("handle") or "").strip().lstrip("@")
+            for row in (r.data or [])
+        ]
+        chs = [c for c in chs if c]
+        return chs if chs else None
+    except Exception as e:
+        asyncio.create_task(
+            push_log(f"supabase config_channels read failed: {e}", "warn")
+        )
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
@@ -200,6 +238,39 @@ log = logging.getLogger("scanner")
 # ---------------------------------------------------------------------------
 DB: Dict[str, Dict[str, Any]] = {}
 SPA_WHITELIST: set = set()
+# Brand labels derived from SPA_WHITELIST at startup — used to detect illegal
+# copycats that reuse a licensed operator's name on an unauthorized TLD
+# (e.g. bet365.vip, betano.xyz, vaidebet.com).
+LICENSED_LABELS: set = set()
+# Generic Portuguese/betting terms that appear as .bet.br labels but are too
+# common to treat as brand-impersonation signals on their own.
+GENERIC_LABELS = {
+    "aposta", "apostas", "apostar", "apostou", "bingo", "brasil", "bravo",
+    "casa", "cassino", "casino", "esporte", "esportes", "fazer", "fazo",
+    "galera", "ganhei", "ginga", "hiper", "ijogo", "jogao", "jogo",
+    "jogos", "luck", "luva", "nossa", "oleybet", "pitaco", "play",
+    "playuzu", "pix", "receba", "reals", "rico", "seguro", "seu",
+    "spin", "start", "super", "tiger", "tigre", "tradicional", "ultra",
+    "vera", "vert", "versus",
+}
+# Public brand aliases for SPA operators whose .bet.br label differs from
+# their market-facing name. Copycats typically reuse the public brand name,
+# not the registered label — so we add these to LICENSED_LABELS explicitly.
+BRAND_ALIASES = {
+    "pixbet",          # Pixbet — registered as pix.bet.br
+    "apostaganha",     # already matches via label, kept for clarity
+    "estrela",         # Estrela Bet — estrelabet.bet.br
+    "sportingbet",     # sportingbet.bet.br
+    "sportybet",       # sportybet.bet.br
+    "brazino",         # Brazino777 — brazino777.bet.br
+    "betnacional",     # betnacional.bet.br
+    "betpix",          # Betpix365 — betpix365.bet.br
+    "apostatudo",      # apostatudo.bet.br
+    "casadeapostas",   # casadeapostas.bet.br
+    "vaidebet",        # vaidebet.bet.br
+    "esportesdasorte", # esportesdasorte.bet.br
+    "esportivavip",    # esportivavip.bet.br
+}
 LOG_BUFFER: deque = deque(maxlen=500)
 WS_CLIENTS: List[WebSocket] = []
 TELEGRAM_DB: Dict[str, Dict[str, Any]] = {}
@@ -314,6 +385,19 @@ async def load_spa_whitelist():
         )
     except Exception as e:
         await push_log(f"SPA whitelist load failed: {e} (using seed list)", "warn")
+    # Derive brand labels for impersonation detection.
+    global LICENSED_LABELS
+    LICENSED_LABELS = {
+        d.split(".")[0].lower() for d in SPA_WHITELIST
+        if len(d.split(".")[0]) >= 5
+        and d.split(".")[0].lower() not in GENERIC_LABELS
+    }
+    LICENSED_LABELS |= (BRAND_ALIASES - GENERIC_LABELS)
+    await push_log(
+        f"Brand-impersonation labels ready: {len(LICENSED_LABELS)} licensed brands "
+        f"tracked for copycat detection",
+        "info",
+    )
     # Mirror to Supabase (no-op if SB not configured).
     _sb_persist_whitelist(SPA_WHITELIST)
 
@@ -500,11 +584,91 @@ def score_risk(record: Dict[str, Any]) -> (int, str, List[str]):
                 f"Portuguese-language betting content hosted outside Brazil ({cc})"
             )
 
-    # Title check
+    # Domain-name signals — unlicensed domains don't lie about what they are.
+    # Strip only the final TLD segment; keep subdomains so "betano.promo.xyz"
+    # still trips the "bet" check.
+    dl = domain.lower()
+    dom_root = dl.rsplit(".", 1)[0] if "." in dl else dl
+    dom_tokens_hit = []
+    if "aposta" in dom_root:
+        dom_tokens_hit.append("aposta")
+    if "cassino" in dom_root or "casino" in dom_root:
+        dom_tokens_hit.append("cassino")
+    # Check "bet" only as prefix/suffix of domain chunks (split on - _ . digits):
+    # matches bet, bet365, betano, betfair, pixbet, superbet, sportsbet —
+    # skips between/better/bettor (middle occurrences) and accidental hits.
+    for chunk in re.split(r"[^a-z]+", dom_root):
+        if chunk == "bet" or (chunk.startswith("bet") and 3 < len(chunk) <= 16
+                              and not chunk.startswith(("betw", "bett", "bete"))):
+            dom_tokens_hit.append("bet")
+            break
+        if chunk.endswith("bet") and len(chunk) <= 20:
+            dom_tokens_hit.append("bet")
+            break
+    if "jogo" in dom_root:
+        dom_tokens_hit.append("jogo")
+    illegal_brand_hit = [
+        b for b in ("tigrinho", "tigre", "aviator", "blaze", "fortune",
+                    "roleta", "crash")
+        if b in dom_root
+    ]
+    # Brand impersonation — the domain reuses a licensed operator's brand
+    # label on an unauthorized TLD (e.g. bet365.vip, betano.xyz, vaidebet.com).
+    # This is THE canonical illegal-copycat pattern in the Brazilian market.
+    impers_hits = []
+    if LICENSED_LABELS:
+        chunks = [c for c in re.split(r"[.\-_]+", dom_root) if c]
+        seen = set()
+        for chunk in chunks:
+            if chunk in LICENSED_LABELS:
+                seen.add(chunk)
+                continue
+            # Prefix / suffix match for labels ≥6 chars (catches "betanopro",
+            # "supervaidebet", etc. without false-positiving short labels).
+            for label in LICENSED_LABELS:
+                if len(label) >= 6 and (chunk.startswith(label) or chunk.endswith(label)):
+                    seen.add(label)
+                    break
+        impers_hits = sorted(seen)
+    if impers_hits:
+        score += 30
+        reasons.append(
+            f"Domain reuses licensed operator brand(s) '{', '.join(impers_hits)}' "
+            f"on an unauthorized TLD — brand-impersonation / copycat pattern"
+        )
+    elif "aposta" in dom_tokens_hit:
+        score += 20
+        reasons.append("Domain name contains 'aposta'")
+    elif "cassino" in dom_tokens_hit:
+        score += 20
+        reasons.append("Domain name contains 'cassino'/'casino'")
+    elif "bet" in dom_tokens_hit:
+        score += 15
+        reasons.append("Domain name contains 'bet'")
+    if illegal_brand_hit:
+        score += 25
+        reasons.append(
+            f"Domain name references known illegal-market brand "
+            f"({', '.join(illegal_brand_hit)})"
+        )
+
+    # Title check — upgraded. Explicit phrases are strong evidence.
     title_lower = (site.get("title") or "").lower()
-    if any(k in title_lower for k in ("aposta", "cassino", "bet", "jogo")) and not licensed:
-        score += 5
-        reasons.append("Betting-related page title")
+    if not licensed and title_lower:
+        if ("online betting" in title_lower
+                or "apostas online" in title_lower
+                or "sports betting" in title_lower
+                or "sportsbook" in title_lower):
+            score += 35
+            reasons.append("Page title explicitly advertises online betting")
+        elif ("casino" in title_lower
+              or "cassino" in title_lower
+              or "gambling" in title_lower):
+            score += 20
+            reasons.append("Page title references casino/gambling")
+        elif any(k in title_lower for k in ("aposta", "bet", "jogo")):
+            score += 10
+            reasons.append("Betting-related page title")
 
     score = max(0, min(100, score))
     if score >= 70:
@@ -841,6 +1005,37 @@ async def lifespan(app: FastAPI):
             "Supabase NOT configured (no SUPABASE_URL/SUPABASE_KEY) — in-memory only",
             "info",
         )
+
+    # Runtime config from Supabase (optional — replaces defaults if populated).
+    if SB:
+        sb_kws = _sb_load_keywords()
+        if sb_kws:
+            KEYWORDS[:] = sb_kws
+            await push_log(
+                f"Loaded {len(sb_kws)} keywords from Supabase config_keywords "
+                f"(overriding defaults): {', '.join(sb_kws)}",
+                "info",
+            )
+        else:
+            await push_log(
+                f"config_keywords empty — using default keywords: "
+                f"{', '.join(KEYWORDS)}",
+                "info",
+            )
+        sb_chs = _sb_load_channels()
+        if sb_chs:
+            TELEGRAM_CHANNELS[:] = sb_chs
+            await push_log(
+                f"Loaded {len(sb_chs)} Telegram channels from Supabase "
+                f"config_channels (overriding defaults)",
+                "info",
+            )
+        else:
+            await push_log(
+                f"config_channels empty — using default channels "
+                f"({len(TELEGRAM_CHANNELS)} handles)",
+                "info",
+            )
 
     await load_spa_whitelist()
     t_ct = asyncio.create_task(poller_loop())

@@ -78,7 +78,14 @@ Scoring (0–100):
 | Betting keyword signals in page text | up to +40 (8 per match, capped) |
 | Pix payment references | +10 |
 | Portuguese content hosted outside Brazil | +10 (only if signals present) |
-| Betting-related page title | +5 |
+| **Domain reuses a licensed operator's brand name on an unauthorized TLD** (e.g. `bet365.vip`, `betano.xyz`, `pixbet.com`) | **+30** |
+| Domain name contains "aposta" | +20 |
+| Domain name contains "cassino" / "casino" | +20 |
+| Domain name contains "bet" (prefix/suffix of a chunk) | +15 |
+| Domain name references illegal-market brand (tigrinho, aviator, blaze, fortune, roleta, crash) | +25 |
+| Page title contains "online betting" / "apostas online" / "sportsbook" | **+35** |
+| Page title contains "casino" / "cassino" / "gambling" | +20 |
+| Page title contains "aposta" / "bet" / "jogo" (weaker match) | +10 |
 | Site unreachable | flat 20 / `unreachable` |
 
 Labels: `high_risk` (≥70), `suspicious` (≥40), `low_risk` (≥20), `clean` (<20), `unreachable`, `licensed`.
