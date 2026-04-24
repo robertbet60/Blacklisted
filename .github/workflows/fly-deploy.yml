@@ -1,0 +1,30 @@
+name: Deploy to Fly.io (São Paulo)
+
+# Auto-deploy on every push to main. Manual trigger available too.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Prevent concurrent deploys racing each other.
+concurrency:
+  group: fly-deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: fly deploy (gru)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Deploy
+        run: flyctl deploy --remote-only
+        env:
+          # Single secret required — stored in GitHub repo → Settings → Secrets
+          # Generate with:  fly tokens create deploy
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

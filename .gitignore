@@ -1,0 +1,36 @@
+# --- Secrets (NEVER commit) ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets.json
+fly.secrets
+.supabase/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# --- Local state ---
+*.db
+*.sqlite
+*.sqlite3
+.DS_Store
+Thumbs.db
+
+# --- Editor / IDE ---
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# --- Build artifacts ---
+dist/
+build/
+*.log

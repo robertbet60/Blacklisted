@@ -1,0 +1,720 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>IllegalBet Scanner · Brazil CT-Log Monitor</title>
+<style>
+  :root {
+    --bg: #0a0e13;
+    --bg2: #0f1620;
+    --panel: #121a25;
+    --panel2: #182330;
+    --border: #1f2e42;
+    --text: #d9e2ec;
+    --muted: #6b7c93;
+    --green: #22d39a;
+    --red: #ff5c7c;
+    --yellow: #ffc857;
+    --blue: #4dc2ff;
+    --purple: #b07bff;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  a { color: var(--blue); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  header {
+    padding: 14px 22px;
+    border-bottom: 1px solid var(--border);
+    display:flex;
+    align-items:center;
+    justify-content: space-between;
+    background: linear-gradient(180deg, #0e1520 0%, var(--bg) 100%);
+  }
+  header .brand { display:flex; align-items:center; gap:12px; font-weight:600; font-size: 15px; letter-spacing: .2px; }
+  header .brand .dot { width:10px; height:10px; border-radius:50%; background:var(--green); box-shadow:0 0 10px var(--green); }
+  header .brand .dot.off { background:var(--red); box-shadow:0 0 10px var(--red); }
+  header .sub { color: var(--muted); font-size: 12px; font-family: var(--mono); }
+  header .actions { display:flex; gap:8px; }
+  button, .btn {
+    background: var(--panel2); color: var(--text); border: 1px solid var(--border);
+    padding: 7px 12px; border-radius: 6px; cursor: pointer; font-size: 12px;
+    font-family: var(--mono);
+  }
+  button:hover { background: #20304a; }
+  button.primary { background: var(--blue); color: #05101a; border-color: transparent; font-weight:600; }
+  button.primary:hover { filter: brightness(1.1); }
+  button.danger { background: var(--red); color: #fff; border-color: transparent; }
+
+  .layout {
+    display:grid;
+    grid-template-columns: 1fr 380px;
+    gap: 16px;
+    padding: 16px 22px;
+    height: calc(100vh - 60px);
+    overflow: hidden;
+  }
+
+  .stats {
+    display:grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+  .stat {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+  }
+  .stat .label { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .8px; }
+  .stat .value { font-size: 22px; font-weight: 700; margin-top: 4px; font-family: var(--mono); }
+  .stat.red .value { color: var(--red); }
+  .stat.yellow .value { color: var(--yellow); }
+  .stat.green .value { color: var(--green); }
+  .stat.blue .value { color: var(--blue); }
+  .stat .sub { font-size: 10.5px; color: var(--muted); margin-top: 2px; font-family: var(--mono); }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    display:flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .panel-head {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    display:flex;
+    align-items:center;
+    justify-content: space-between;
+    background: var(--panel2);
+  }
+  .panel-head h3 { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); }
+  .panel-body { flex: 1; overflow: auto; }
+
+  .toolbar {
+    padding: 10px 14px;
+    display:flex; gap: 8px; align-items:center;
+    border-bottom: 1px solid var(--border);
+    background: #0e1620;
+  }
+  .toolbar input[type="text"] {
+    flex: 1;
+    background: #0a0f17; border: 1px solid var(--border); color: var(--text);
+    padding: 7px 10px; border-radius: 6px; font-family: var(--mono); font-size: 12px;
+  }
+  .toolbar select {
+    background: #0a0f17; border: 1px solid var(--border); color: var(--text);
+    padding: 7px 10px; border-radius: 6px; font-family: var(--mono); font-size: 12px;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12.5px;
+    font-family: var(--mono);
+  }
+  thead th {
+    position: sticky; top: 0;
+    background: #0e1620;
+    color: var(--muted);
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: .5px;
+    font-size: 10.5px;
+    padding: 9px 12px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    z-index: 1;
+  }
+  tbody td { padding: 9px 12px; border-bottom: 1px solid #172131; }
+  tbody tr:hover { background: #131d2b; cursor: pointer; }
+  .badge {
+    display: inline-block;
+    padding: 2px 7px;
+    border-radius: 999px;
+    font-size: 10.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .5px;
+  }
+  .badge.high_risk { background: rgba(255,92,124,.15); color: var(--red); border: 1px solid rgba(255,92,124,.3); }
+  .badge.suspicious { background: rgba(255,200,87,.15); color: var(--yellow); border: 1px solid rgba(255,200,87,.3); }
+  .badge.low_risk { background: rgba(77,194,255,.12); color: var(--blue); border: 1px solid rgba(77,194,255,.25); }
+  .badge.clean { background: rgba(34,211,154,.12); color: var(--green); border: 1px solid rgba(34,211,154,.25); }
+  .badge.licensed { background: rgba(176,123,255,.15); color: var(--purple); border: 1px solid rgba(176,123,255,.3); }
+  .badge.unreachable { background: rgba(107,124,147,.15); color: var(--muted); border: 1px solid rgba(107,124,147,.3); }
+
+  .logs {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    padding: 10px 12px;
+    line-height: 1.55;
+  }
+  .logs .line { white-space: pre-wrap; word-break: break-all; }
+  .logs .line .t { color: var(--muted); margin-right: 8px; }
+  .logs .line.warn { color: var(--yellow); }
+  .logs .line.error { color: var(--red); }
+  .logs .line.info { color: var(--text); }
+  .logs .line.ping { color: #2c3a52; font-size: 10px; }
+
+  /* Modal */
+  .modal-backdrop {
+    position: fixed; inset: 0; background: rgba(0,0,0,.65);
+    display:none; align-items:center; justify-content:center; z-index: 20;
+    padding: 20px;
+  }
+  .modal-backdrop.show { display: flex; }
+  .modal {
+    background: var(--panel); border:1px solid var(--border);
+    border-radius: 10px; max-width: 820px; width: 100%; max-height: 90vh;
+    overflow: hidden; display:flex; flex-direction: column;
+  }
+  .modal-head {
+    padding: 14px 18px; border-bottom: 1px solid var(--border); display:flex;
+    justify-content: space-between; align-items:center;
+  }
+  .modal-head h2 { margin:0; font-size: 15px; font-family: var(--mono); }
+  .modal-body { padding: 18px; overflow:auto; font-size: 13px; }
+  .modal-body h4 { color: var(--muted); font-size: 11px; text-transform: uppercase;
+    letter-spacing: .8px; margin: 14px 0 6px; }
+  .modal-body pre { background: #0a0f17; border: 1px solid var(--border);
+    border-radius: 6px; padding: 10px; overflow:auto; font-size: 11.5px; }
+  .kv { display:grid; grid-template-columns: 160px 1fr; gap: 6px 12px; font-family: var(--mono); font-size: 12px; }
+  .kv .k { color: var(--muted); }
+  .reason-list { margin: 0; padding-left: 18px; }
+  .reason-list li { margin-bottom: 4px; }
+
+  .toast { position: fixed; bottom: 16px; right: 16px; background: var(--panel2);
+    border: 1px solid var(--border); color: var(--text); padding: 10px 14px;
+    border-radius: 6px; font-size: 12.5px; font-family: var(--mono);
+    opacity: 0; transform: translateY(8px); transition: all .25s; z-index: 30; }
+  .toast.show { opacity: 1; transform: none; }
+
+  @media (max-width: 980px) {
+    .layout { grid-template-columns: 1fr; height: auto; overflow: auto; }
+    .stats { grid-template-columns: repeat(2, 1fr); }
+    .right-col { height: 400px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <span class="dot" id="status-dot"></span>
+    IllegalBet Scanner
+    <span class="sub" id="status-text">Brazil CT-Log Monitor · initializing…</span>
+  </div>
+  <div class="actions">
+    <button id="btn-refresh">⟳ Refresh</button>
+    <button id="btn-toggle-poller">Pause Poller</button>
+    <button id="btn-telegram">Telegram</button>
+    <button id="btn-keywords">Keywords</button>
+    <button id="btn-whitelist">Whitelist</button>
+  </div>
+</header>
+
+<div class="layout">
+  <div class="left-col" style="min-height:0; display:flex; flex-direction:column;">
+    <div class="stats">
+      <div class="stat blue">
+        <div class="label">Tracked Domains</div>
+        <div class="value" id="s-total">0</div>
+        <div class="sub" id="s-last-poll">last poll: –</div>
+      </div>
+      <div class="stat red">
+        <div class="label">High Risk</div>
+        <div class="value" id="s-high">0</div>
+        <div class="sub">unlicensed + signals</div>
+      </div>
+      <div class="stat yellow">
+        <div class="label">Suspicious</div>
+        <div class="value" id="s-susp">0</div>
+        <div class="sub">mid-confidence</div>
+      </div>
+      <div class="stat green">
+        <div class="label">Licensed (SPA)</div>
+        <div class="value" id="s-licensed">0</div>
+        <div class="sub" id="s-wl-size">whitelist: –</div>
+      </div>
+      <div class="stat">
+        <div class="label">Cycles</div>
+        <div class="value" id="s-cycles">0</div>
+        <div class="sub" id="s-started">since: –</div>
+      </div>
+    </div>
+
+    <div class="panel" style="flex:1; min-height:0;">
+      <div class="toolbar">
+        <input id="scan-input" type="text" placeholder="Scan a domain on demand (e.g. example.bet.br)"/>
+        <button id="btn-scan" class="primary">Scan Now</button>
+      </div>
+      <div class="toolbar">
+        <input id="filter-q" type="text" placeholder="Filter tracked domains…"/>
+        <select id="filter-risk">
+          <option value="">All risk levels</option>
+          <option value="high_risk">High Risk</option>
+          <option value="suspicious">Suspicious</option>
+          <option value="low_risk">Low Risk</option>
+          <option value="clean">Clean</option>
+          <option value="unreachable">Unreachable</option>
+        </select>
+      </div>
+      <div class="panel-body">
+        <table>
+          <thead>
+            <tr>
+              <th>Domain</th>
+              <th>Risk</th>
+              <th>Score</th>
+              <th>Hosting</th>
+              <th>Source</th>
+              <th>Last Check</th>
+            </tr>
+          </thead>
+          <tbody id="domains-body">
+            <tr><td colspan="6" style="color:var(--muted); padding:20px; text-align:center;">Waiting for first scan cycle…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="right-col" style="min-height:0;">
+    <div class="panel" style="height:100%;">
+      <div class="panel-head">
+        <h3>Live Event Log</h3>
+        <button id="btn-clear-logs" style="font-size:10.5px; padding: 4px 8px;">Clear</button>
+      </div>
+      <div class="logs panel-body" id="logs"></div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="modal">
+  <div class="modal">
+    <div class="modal-head">
+      <h2 id="modal-title">Domain detail</h2>
+      <button id="modal-close">Close</button>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// -------- helpers
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const timeago = (iso) => {
+  if (!iso) return "–";
+  const s = Math.round((Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 60) return s + "s ago";
+  if (s < 3600) return Math.round(s/60) + "m ago";
+  if (s < 86400) return Math.round(s/3600) + "h ago";
+  return Math.round(s/86400) + "d ago";
+};
+const fmtTime = (iso) => iso ? new Date(iso).toLocaleTimeString() : "–";
+const toast = (msg) => {
+  const el = $("toast");
+  el.textContent = msg;
+  el.classList.add("show");
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.remove("show"), 3000);
+};
+
+// -------- stats
+async function refreshStats() {
+  try {
+    const r = await fetch("/api/stats");
+    const s = await r.json();
+    $("s-total").textContent = s.tracked_domains ?? 0;
+    $("s-high").textContent = [...document.querySelectorAll("tr[data-risk='high_risk']")].length || 0;
+    $("s-wl-size").textContent = "whitelist: " + (s.whitelist_size ?? "–");
+    $("s-last-poll").textContent = "last poll: " + fmtTime(s.last_poll);
+    $("s-started").textContent = s.started_at ? "since: " + fmtTime(s.started_at) : "not started";
+    $("s-cycles").textContent = s.keywords_cycled ?? 0;
+    $("status-dot").classList.toggle("off", !s.running);
+    $("status-text").textContent = s.running
+      ? `Brazil CT-Log Monitor · ${s.tracked_domains} tracked · ${s.total_flagged} flagged`
+      : "Poller paused";
+    $("btn-toggle-poller").textContent = s.running ? "Pause Poller" : "Resume Poller";
+  } catch (e) {}
+}
+
+// -------- domains
+let allDomains = [];
+async function refreshDomains() {
+  try {
+    const risk = $("filter-risk").value;
+    const q = $("filter-q").value;
+    const url = new URL("/api/domains", location.origin);
+    if (risk) url.searchParams.set("risk", risk);
+    if (q) url.searchParams.set("q", q);
+    url.searchParams.set("limit", "500");
+    const r = await fetch(url);
+    const data = await r.json();
+    allDomains = data.items;
+    renderDomains(data.items);
+
+    const counts = { high_risk: 0, suspicious: 0, low_risk: 0, clean: 0, licensed: 0, unreachable: 0 };
+    for (const d of data.items) counts[d.licensed ? "licensed" : d.risk_label] = (counts[d.licensed ? "licensed" : d.risk_label] || 0) + 1;
+    $("s-high").textContent = counts.high_risk || 0;
+    $("s-susp").textContent = counts.suspicious || 0;
+    $("s-licensed").textContent = counts.licensed || 0;
+  } catch (e) {}
+}
+
+function renderDomains(items) {
+  const tbody = $("domains-body");
+  if (!items.length) {
+    tbody.innerHTML = `<tr><td colspan="6" style="color:var(--muted); padding:20px; text-align:center;">No domains match.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = items.map(d => {
+    const label = d.licensed ? "licensed" : d.risk_label;
+    const host = d.infra?.country_code
+      ? `${esc(d.infra.country_code)} · ${esc((d.infra.isp || "").slice(0, 28))}`
+      : "—";
+    return `
+      <tr data-domain="${esc(d.domain)}" data-risk="${esc(d.risk_label)}">
+        <td style="color:var(--text)">${esc(d.domain)}</td>
+        <td><span class="badge ${label}">${label.replace("_"," ")}</span></td>
+        <td style="color:var(--muted)">${d.risk_score}</td>
+        <td style="color:var(--muted)">${host}</td>
+        <td style="color:var(--muted)">${esc(d.source || "—")}</td>
+        <td style="color:var(--muted)">${esc(timeago(d.last_checked))}</td>
+      </tr>`;
+  }).join("");
+  tbody.querySelectorAll("tr[data-domain]").forEach(tr => {
+    tr.addEventListener("click", () => openDomainModal(tr.dataset.domain));
+  });
+}
+
+// -------- modal
+async function openDomainModal(domain) {
+  const r = await fetch("/api/domain/" + encodeURIComponent(domain));
+  if (!r.ok) { toast("No data for " + domain); return; }
+  const d = await r.json();
+  const label = d.licensed ? "licensed" : d.risk_label;
+  $("modal-title").innerHTML = `${esc(d.domain)} &nbsp;<span class="badge ${label}">${label.replace("_"," ")}</span>`;
+  const site = d.site || {};
+  const infra = d.infra || {};
+  const cnpj = d.cnpj || null;
+
+  $("modal-body").innerHTML = `
+    <div class="kv">
+      <div class="k">Risk score</div><div>${d.risk_score}/100</div>
+      <div class="k">First seen</div><div>${esc(d.first_seen)}</div>
+      <div class="k">Last checked</div><div>${esc(d.last_checked)}</div>
+      <div class="k">Source</div><div>${esc(d.source || "—")}</div>
+      <div class="k">IP / resolution</div><div>${esc(d.ip || "dns_fail")}</div>
+      <div class="k">Licensed (SPA)</div><div>${d.licensed ? "✅ yes" : "❌ no"}</div>
+    </div>
+
+    <h4>Why was it flagged?</h4>
+    <ul class="reason-list">${(d.reasons||[]).map(r => `<li>${esc(r)}</li>`).join("") || "<li style='color:var(--muted)'>No specific reasons.</li>"}</ul>
+
+    <h4>Hosting / ASN</h4>
+    <div class="kv">
+      <div class="k">Country</div><div>${esc(infra.country || "—")} (${esc(infra.country_code || "—")})</div>
+      <div class="k">ISP</div><div>${esc(infra.isp || "—")}</div>
+      <div class="k">Organization</div><div>${esc(infra.org || "—")}</div>
+      <div class="k">ASN</div><div>${esc(infra.asn || "—")}</div>
+    </div>
+
+    <h4>Site fingerprint</h4>
+    <div class="kv">
+      <div class="k">Reachable</div><div>${site.ok ? "yes" : "no — " + esc(site.error || "")}</div>
+      <div class="k">Status code</div><div>${esc(site.status_code ?? "—")}</div>
+      <div class="k">Final URL</div><div>${esc(site.final_url || "—")}</div>
+      <div class="k">Title</div><div>${esc(site.title || "—")}</div>
+      <div class="k">Signals</div><div>${(site.signals||[]).map(s=>`<span class="badge suspicious" style="margin-right:4px">${esc(s)}</span>`).join(" ") || "—"}</div>
+      <div class="k">Tech fingerprints</div><div>${(site.fingerprints||[]).map(s=>`<span class="badge low_risk" style="margin-right:4px">${esc(s)}</span>`).join(" ") || "—"}</div>
+      <div class="k">CNPJ refs</div><div>${(site.cnpj_hits||[]).join(", ") || "—"}</div>
+    </div>
+
+    ${cnpj && cnpj.valid ? `
+      <h4>CNPJ lookup</h4>
+      <div class="kv">
+        <div class="k">Name</div><div>${esc(cnpj.name || "—")}</div>
+        <div class="k">Status</div><div>${esc(cnpj.status || "—")}</div>
+        <div class="k">Location</div><div>${esc(cnpj.city || "—")} / ${esc(cnpj.state || "—")}</div>
+      </div>` : ""}
+
+    <h4>Raw record</h4>
+    <pre>${esc(JSON.stringify(d, null, 2))}</pre>
+  `;
+  $("modal").classList.add("show");
+}
+
+$("modal-close").onclick = () => $("modal").classList.remove("show");
+$("modal").addEventListener("click", (e) => { if (e.target === $("modal")) $("modal").classList.remove("show"); });
+
+// -------- scan
+$("btn-scan").onclick = async () => {
+  const domain = $("scan-input").value.trim().toLowerCase();
+  if (!domain) return;
+  toast("Scanning " + domain + "…");
+  try {
+    const r = await fetch("/api/scan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ domain })
+    });
+    if (!r.ok) { toast("Scan failed"); return; }
+    await r.json();
+    toast("Scan done");
+    $("scan-input").value = "";
+    refreshDomains();
+  } catch (e) { toast("Error: " + e.message); }
+};
+$("scan-input").addEventListener("keyup", (e) => { if (e.key === "Enter") $("btn-scan").click(); });
+
+// -------- filters
+$("filter-q").addEventListener("input", debounce(refreshDomains, 200));
+$("filter-risk").addEventListener("change", refreshDomains);
+$("btn-refresh").onclick = () => { refreshStats(); refreshDomains(); toast("Refreshed"); };
+
+function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; }
+
+// -------- poller control
+$("btn-toggle-poller").onclick = async () => {
+  const running = !$("status-dot").classList.contains("off");
+  const action = running ? "stop" : "start";
+  await fetch("/api/poller/" + action, { method: "POST" });
+  setTimeout(refreshStats, 500);
+};
+
+// -------- whitelist
+$("btn-whitelist").onclick = async () => {
+  const r = await fetch("/api/whitelist");
+  const d = await r.json();
+  $("modal-title").innerHTML = `SPA Licensed Operators &nbsp;<span class="badge licensed">${d.count}</span>`;
+  $("modal-body").innerHTML = `
+    <p style="color:var(--muted); font-size:12px">Operators licensed by the Secretaria de Prêmios e Apostas (SPA) — Ministério da Fazenda. Anything tracked that is NOT on this list is unlicensed.</p>
+    <pre>${esc(d.operators.join("\n"))}</pre>`;
+  $("modal").classList.add("show");
+};
+
+// -------- telegram
+$("btn-telegram").onclick = async () => {
+  const r = await fetch("/api/telegram/channels");
+  const d = await r.json();
+
+  const rows = d.items.map(c => {
+    const status = c.error
+      ? `<span class="badge high_risk">error</span>`
+      : (c.last_scraped
+          ? `<span class="badge clean">ok</span>`
+          : `<span class="badge unreachable">pending</span>`);
+    return `
+      <tr data-ch="${esc(c.channel)}">
+        <td style="padding:8px 10px 8px 0">
+          <div><strong>@${esc(c.channel)}</strong></div>
+          <div style="color:var(--muted); font-size:11px; max-width:280px;">${esc(c.title || "—")}</div>
+        </td>
+        <td style="padding:8px 10px; color:var(--muted)">${esc(c.subscribers || "—")}</td>
+        <td style="padding:8px 10px; color:var(--muted)">${c.messages_scanned || 0}</td>
+        <td style="padding:8px 10px; color:var(--muted)">${c.domains_count || 0}</td>
+        <td style="padding:8px 10px"><span class="badge suspicious">${c.flagged_count || 0}</span></td>
+        <td style="padding:8px 10px"><span class="badge high_risk">${c.high_risk_count || 0}</span></td>
+        <td style="padding:8px 10px">${status}</td>
+      </tr>`;
+  }).join("");
+
+  $("modal-title").innerHTML = `Telegram Channel Monitor &nbsp;<span class="badge licensed">${d.count}</span>`;
+  $("modal-body").innerHTML = `
+    <p style="color:var(--muted); font-size:12px; margin-top:0">
+      Scraping <code>t.me/s/{channel}</code> public previews every 5 minutes (no Telegram auth). Every outbound URL in a message gets pushed through the same validator the CT-log poller uses. Click a channel to drill into its domains.
+    </p>
+
+    <div style="display:flex; gap:8px; margin:12px 0;">
+      <input id="tg-add-input" type="text" placeholder="Add channel handle (e.g. tigrinhobrasil)"
+             style="flex:1; background:#0a0f17; border:1px solid var(--border); color:var(--text); padding:7px 10px; border-radius:6px; font-family:var(--mono); font-size:12px;"/>
+      <button id="tg-add-btn" class="primary">+ Add</button>
+    </div>
+
+    <table style="width:100%; font-size:12.5px; border-collapse:collapse;">
+      <thead>
+        <tr style="color:var(--muted); text-transform:uppercase; font-size:10.5px; letter-spacing:.5px;">
+          <th style="text-align:left; padding:6px 10px 6px 0; border-bottom:1px solid var(--border)">Channel</th>
+          <th style="text-align:left; padding:6px 10px; border-bottom:1px solid var(--border)">Subs</th>
+          <th style="text-align:left; padding:6px 10px; border-bottom:1px solid var(--border)">Msgs</th>
+          <th style="text-align:left; padding:6px 10px; border-bottom:1px solid var(--border)">Domains</th>
+          <th style="text-align:left; padding:6px 10px; border-bottom:1px solid var(--border)">Flagged</th>
+          <th style="text-align:left; padding:6px 10px; border-bottom:1px solid var(--border)">High Risk</th>
+          <th style="text-align:left; padding:6px 10px; border-bottom:1px solid var(--border)">Status</th>
+        </tr>
+      </thead>
+      <tbody id="tg-tbody">${rows || `<tr><td colspan="7" style="padding:20px; text-align:center; color:var(--muted)">No scrape cycles yet. Wait ~1 minute.</td></tr>`}</tbody>
+    </table>
+  `;
+  // Wire up row clicks for drill-down
+  document.querySelectorAll("#tg-tbody tr[data-ch]").forEach(tr => {
+    tr.style.cursor = "pointer";
+    tr.addEventListener("click", () => openTelegramChannelDetail(tr.dataset.ch));
+  });
+  // Wire up add button
+  $("tg-add-btn").onclick = async () => {
+    const v = $("tg-add-input").value.trim();
+    if (!v) return;
+    const r = await fetch("/api/telegram/add/" + encodeURIComponent(v), { method: "POST" });
+    if (r.ok) { toast(`Added @${v}`); $("tg-add-input").value = ""; setTimeout(() => $("btn-telegram").click(), 300); }
+    else toast("Failed to add");
+  };
+  $("tg-add-input").addEventListener("keyup", (e) => { if (e.key === "Enter") $("tg-add-btn").click(); });
+
+  $("modal").classList.add("show");
+};
+
+async function openTelegramChannelDetail(ch) {
+  const r = await fetch("/api/telegram/channel/" + encodeURIComponent(ch));
+  if (!r.ok) { toast("No data yet — wait for next cycle"); return; }
+  const d = await r.json();
+  const domainRows = (d.domains_detail || []).map(row => {
+    const label = row.licensed ? "licensed" : (row.risk_label || "pending");
+    return `
+      <tr data-domain="${esc(row.domain)}">
+        <td style="padding:5px 10px 5px 0; color:var(--text)">${esc(row.domain)}</td>
+        <td style="padding:5px 10px"><span class="badge ${label}">${label.replace('_',' ')}</span></td>
+        <td style="padding:5px 10px; color:var(--muted)">${row.risk_score ?? "—"}</td>
+      </tr>`;
+  }).join("");
+
+  $("modal-title").innerHTML = `@${esc(ch)} &nbsp;<a href="${esc(d.url)}" target="_blank" style="font-size:12px">↗ open on t.me</a>`;
+  $("modal-body").innerHTML = `
+    <div class="kv">
+      <div class="k">Title</div><div>${esc(d.channel_title || "—")}</div>
+      <div class="k">Subscribers</div><div>${esc(d.count_subscribers || "—")}</div>
+      <div class="k">Last scraped</div><div>${esc(d.last_scraped || "—")}</div>
+      <div class="k">Messages scanned</div><div>${d.messages_scanned || 0}</div>
+      <div class="k">Domains discovered</div><div>${(d.all_domains || []).length}</div>
+      <div class="k">First seen</div><div>${esc(d.first_seen || "—")}</div>
+    </div>
+    ${d.channel_description ? `<h4>Description</h4><p style="color:var(--muted); font-size:12.5px">${esc(d.channel_description)}</p>` : ""}
+    <h4>Domains extracted from this channel's messages</h4>
+    <table style="width:100%; font-size:12.5px"><tbody>${domainRows || "<tr><td colspan='3' style='color:var(--muted); padding:10px'>No domains extracted yet.</td></tr>"}</tbody></table>
+  `;
+  document.querySelectorAll("#modal-body tr[data-domain]").forEach(tr => {
+    tr.style.cursor = "pointer";
+    tr.addEventListener("click", () => openDomainModal(tr.dataset.domain));
+  });
+}
+
+// -------- keywords / patterns under review
+$("btn-keywords").onclick = async () => {
+  const r = await fetch("/api/keywords");
+  const d = await r.json();
+
+  const pollList = d.ct_poll_keywords.items
+    .map(k => `<span class="badge low_risk" style="margin:2px 3px 2px 0">${esc(k)}</span>`).join("");
+
+  const signalList = d.betting_signals.items
+    .map(s => `
+      <tr>
+        <td style="padding:4px 10px 4px 0"><span class="badge suspicious">${esc(s.label)}</span></td>
+        <td style="padding:4px 0; color:var(--muted); font-family:var(--mono); font-size:11px">${esc(s.pattern)}</td>
+      </tr>`).join("");
+
+  const providers = d.tech_fingerprints.gambling_providers
+    .map(f => `
+      <tr>
+        <td style="padding:4px 10px 4px 0"><span class="badge high_risk">${esc(f.name)}</span></td>
+        <td style="padding:4px 0; color:var(--muted)">${esc(f.detects)}</td>
+      </tr>`).join("");
+  const payment = d.tech_fingerprints.payment
+    .map(f => `
+      <tr>
+        <td style="padding:4px 10px 4px 0"><span class="badge suspicious">${esc(f.name)}</span></td>
+        <td style="padding:4px 0; color:var(--muted)">${esc(f.detects)}</td>
+      </tr>`).join("");
+  const analytics = d.tech_fingerprints.analytics
+    .map(f => `
+      <tr>
+        <td style="padding:4px 10px 4px 0"><span class="badge low_risk">${esc(f.name)}</span></td>
+        <td style="padding:4px 0; color:var(--muted)">${esc(f.detects)}</td>
+      </tr>`).join("");
+
+  const tldRules = d.tld_rules.map(t => `
+    <div style="margin-bottom:10px; padding:8px 10px; background:#0a0f17; border:1px solid var(--border); border-radius:6px;">
+      <div><span class="badge high_risk">${esc(t.tld)}</span></div>
+      <div style="margin-top:6px; font-size:12px;"><strong style="color:var(--text)">Rule:</strong> <span style="color:var(--muted)">${esc(t.rule)}</span></div>
+      <div style="margin-top:4px; font-size:12px;"><strong style="color:var(--text)">Why:</strong> <span style="color:var(--muted)">${esc(t.rationale)}</span></div>
+    </div>`).join("");
+
+  const thresholds = Object.entries(d.score_thresholds).map(([k, v]) => `
+    <tr>
+      <td style="padding:3px 10px 3px 0"><span class="badge ${k}">${k.replace('_',' ')}</span></td>
+      <td style="padding:3px 0; color:var(--muted); font-family:var(--mono); font-size:11px">${esc(v)}</td>
+    </tr>`).join("");
+
+  $("modal-title").innerHTML = `Scanner Rules & Keywords`;
+  $("modal-body").innerHTML = `
+    <p style="color:var(--muted); font-size:12px; margin-top:0">
+      Everything the scanner looks for, in one place. Every tracked domain is evaluated against these patterns.
+    </p>
+
+    <h4>CT-Log Poll Keywords <span style="color:var(--muted); font-weight:normal">— queried against crt.sh every ${d.ct_poll_keywords.items ? "cycle" : ""}</span></h4>
+    <div style="line-height:2">${pollList}</div>
+    <p style="color:var(--muted); font-size:11.5px; margin-top:6px">${esc(d.ct_poll_keywords.description)}</p>
+
+    <h4>Betting Signals <span style="color:var(--muted); font-weight:normal">— scanned in page text body</span></h4>
+    <table style="width:100%; font-size:12.5px"><tbody>${signalList}</tbody></table>
+    <p style="color:var(--muted); font-size:11.5px; margin-top:6px">${esc(d.betting_signals.description)}</p>
+
+    <h4>Gambling Provider Fingerprints <span style="color:var(--muted); font-weight:normal">— operator-exclusive (+55 each)</span></h4>
+    <table style="width:100%; font-size:12.5px"><tbody>${providers}</tbody></table>
+
+    <h4>Payment & Analytics Fingerprints</h4>
+    <table style="width:100%; font-size:12.5px"><tbody>${payment}${analytics}</tbody></table>
+
+    <h4>TLD Rules</h4>
+    ${tldRules}
+
+    <h4>Score Thresholds → Labels</h4>
+    <table style="width:100%; font-size:12.5px"><tbody>${thresholds}</tbody></table>
+  `;
+  $("modal").classList.add("show");
+};
+
+// -------- live logs via websocket
+function connectLogs() {
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  const ws = new WebSocket(`${proto}//${location.host}/ws/logs`);
+  ws.onmessage = (e) => {
+    const entry = JSON.parse(e.data);
+    if (entry.level === "ping") return;
+    const logs = $("logs");
+    const line = document.createElement("div");
+    line.className = "line " + (entry.level || "info");
+    line.innerHTML = `<span class="t">${fmtTime(entry.t)}</span>${esc(entry.msg)}`;
+    logs.appendChild(line);
+    while (logs.childNodes.length > 400) logs.removeChild(logs.firstChild);
+    logs.scrollTop = logs.scrollHeight;
+    // If message looks like a domain event, refresh table
+    if (/\[(HIGH_RISK|SUSPICIOUS|LICENSED|CLEAN|LOW_RISK|UNREACHABLE)\]/.test(entry.msg)) {
+      refreshDomains();
+      refreshStats();
+    }
+  };
+  ws.onclose = () => setTimeout(connectLogs, 3000);
+  ws.onerror = () => ws.close();
+}
+$("btn-clear-logs").onclick = () => { $("logs").innerHTML = ""; };
+
+// -------- boot
+refreshStats();
+refreshDomains();
+connectLogs();
+setInterval(refreshStats, 5000);
+setInterval(refreshDomains, 15000);
+</script>
+</body>
+</html>

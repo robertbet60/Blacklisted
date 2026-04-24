@@ -1,0 +1,34 @@
+# Keep secrets & local state OUT of the Docker image.
+# Even though Fly injects secrets via env, leaving .env in the build
+# context would bake it into the image layer.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Local state
+*.db
+*.sqlite
+*.sqlite3
+
+# VCS / editor / CI
+.git/
+.github/
+.gitignore
+.idea/
+.vscode/
+.DS_Store
+
+# Docs don't need to ship inside the container
+README.md
+DEPLOY.md
+SECURITY.md
