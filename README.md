@@ -86,9 +86,18 @@ Scoring (0–100):
 | Page title contains "online betting" / "apostas online" / "sportsbook" | **+35** |
 | Page title contains "casino" / "cassino" / "gambling" | +20 |
 | Page title contains "aposta" / "bet" / "jogo" (weaker match) | +10 |
+| **Potentially affiliate / tipster pattern detected** (tipster vocab + outbound links to licensed operators + affiliate title) | → score capped at 25 / `potentially_affiliate` |
 | Site unreachable | flat 20 / `unreachable` |
 
-Labels: `high_risk` (≥70), `suspicious` (≥40), `low_risk` (≥20), `clean` (<20), `unreachable`, `licensed`.
+Labels: `high_risk` (≥70), `suspicious` (≥40), `low_risk` (≥20), `clean` (<20), `unreachable`, `licensed`, `potentially_affiliate`.
+
+**Potentially-affiliate / tipster carve-out.** Sites like `aposta10.com` use the same betting vocabulary as operators and reference the same brands — a naive signal-count scores them as high-risk illegal operators, which is wrong. The label is `potentially_affiliate` (not a definitive call — just "probably not an operator") and the scanner flags it via a two-of-three indicator rule:
+
+1. Tipster vocabulary in body text (`palpites`, `prognóstico`, `melhores casas`, `cupom de bônus`, `review`, `análise das casas`, etc.).
+2. Outbound links to **multiple distinct licensed operators** — an illegal operator does not advertise its competitors; an affiliate is paid to.
+3. Affiliate-specific keyword in the page title (`palpite`, `dicas`, `tipster`, `afiliado`, `melhores casas`).
+
+When ≥2 of those fire, the domain is labeled `potentially_affiliate` and the score is capped at 25 (low-tier) with a detailed reason. These sites are still tracked — they may warrant regulatory attention — they just aren't illegal operators themselves.
 
 **`.bet.br` is auto-licensed.** Under the registro.br / CGI.br policy the `.bet.br` second-level domain is reserved for SPA-authorized operators — registration itself requires proof of authorization from the Secretaria de Prêmios e Apostas. Every `.bet.br` that appears in CT logs is therefore licensed by construction, so the scanner short-circuits the TLD to `licensed` / 0.
 

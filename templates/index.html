@@ -149,6 +149,8 @@
   .badge.clean { background: rgba(34,211,154,.12); color: var(--green); border: 1px solid rgba(34,211,154,.25); }
   .badge.licensed { background: rgba(176,123,255,.15); color: var(--purple); border: 1px solid rgba(176,123,255,.3); }
   .badge.unreachable { background: rgba(107,124,147,.15); color: var(--muted); border: 1px solid rgba(107,124,147,.3); }
+  .badge.potentially_affiliate { background: rgba(255,150,60,.15); color: #ff9e3c; border: 1px solid rgba(255,150,60,.3); }
+  .badge.affiliate { background: rgba(255,150,60,.15); color: #ff9e3c; border: 1px solid rgba(255,150,60,.3); }
 
   .logs {
     font-family: var(--mono);
@@ -259,6 +261,7 @@
           <option value="">All risk levels</option>
           <option value="high_risk">High Risk</option>
           <option value="suspicious">Suspicious</option>
+          <option value="potentially_affiliate">Potentially affiliate</option>
           <option value="low_risk">Low Risk</option>
           <option value="clean">Clean</option>
           <option value="unreachable">Unreachable</option>
@@ -361,7 +364,7 @@ async function refreshDomains() {
     allDomains = data.items;
     renderDomains(data.items);
 
-    const counts = { high_risk: 0, suspicious: 0, low_risk: 0, clean: 0, licensed: 0, unreachable: 0 };
+    const counts = { high_risk: 0, suspicious: 0, potentially_affiliate: 0, low_risk: 0, clean: 0, licensed: 0, unreachable: 0 };
     for (const d of data.items) counts[d.licensed ? "licensed" : d.risk_label] = (counts[d.licensed ? "licensed" : d.risk_label] || 0) + 1;
     $("s-high").textContent = counts.high_risk || 0;
     $("s-susp").textContent = counts.suspicious || 0;
@@ -435,6 +438,8 @@ async function openDomainModal(domain) {
       <div class="k">Title</div><div>${esc(site.title || "—")}</div>
       <div class="k">Signals</div><div>${(site.signals||[]).map(s=>`<span class="badge suspicious" style="margin-right:4px">${esc(s)}</span>`).join(" ") || "—"}</div>
       <div class="k">Tech fingerprints</div><div>${(site.fingerprints||[]).map(s=>`<span class="badge low_risk" style="margin-right:4px">${esc(s)}</span>`).join(" ") || "—"}</div>
+      <div class="k">Affiliate markers</div><div>${(site.affiliate_markers||[]).map(s=>`<span class="badge potentially_affiliate" style="margin-right:4px">${esc(s)}</span>`).join(" ") || "—"}</div>
+      <div class="k">Links to licensed ops</div><div>${(site.licensed_op_links||[]).map(s=>`<span class="badge licensed" style="margin-right:4px">${esc(s)}</span>`).join(" ") || "—"}</div>
       <div class="k">CNPJ refs</div><div>${(site.cnpj_hits||[]).join(", ") || "—"}</div>
     </div>
 

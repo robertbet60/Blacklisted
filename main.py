@@ -478,6 +478,60 @@ async def fetch_site(domain: str, client: httpx.AsyncClient) -> Dict[str, Any]:
                 r"\b\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2}\b", html
             )
 
+            # Affiliate / tipster detection
+            # -----------------------------
+            # These sites talk about gambling brands and use the same
+            # betting vocabulary as operators, so the naive "keywords +
+            # brand mention" scoring flags them as illegal when they are
+            # actually content sites — reviews, rankings, palpites — that
+            # refer users to licensed operators for a commission.
+            #
+            # Two strong, objective indicators:
+            #   1. Outbound links to MULTIPLE licensed operators — an
+            #      actual illegal operator does not advertise its
+            #      competitors; an affiliate does.
+            #   2. Tipster-specific vocabulary in title/body that is
+            #      absent from operator UIs ("palpites", "prognóstico",
+            #      "melhores casas de apostas", "cupom de bônus", etc.).
+            text_lower = text.lower()
+            affiliate_vocab = (
+                "palpite", "palpites", "prognóstico", "prognosticos",
+                "prognósticos", "tipster", "afiliado", "afiliados",
+                "melhores casas", "ranking de casas", "top casas",
+                "melhores sites de apostas", "comparativo de casas",
+                "análise das casas", "análise de casas",
+                "review", "resenha", "dicas de apostas", "dica do dia",
+                "dicas do dia", "código promocional", "codigo promocional",
+                "cupom de bônus", "cupom promocional", "bônus de boas-vindas",
+                "bônus de cadastro",
+            )
+            affiliate_markers = sorted({p for p in affiliate_vocab if p in text_lower})
+
+            # Outbound links to distinct licensed operators (SPA whitelist
+            # OR `.bet.br` hosts other than self).
+            licensed_op_links: set = set()
+            self_host = domain.lower()
+            for a in soup.find_all("a", href=True):
+                href = (a.get("href") or "").strip()
+                m = re.search(r"https?://([^/\s?#]+)", href, re.I)
+                if not m:
+                    continue
+                host = m.group(1).lower().lstrip(".")
+                if host == self_host or host.endswith("." + self_host):
+                    continue
+                # Match against whitelist (exact or subdomain of a listed op)
+                hit = None
+                for w in SPA_WHITELIST:
+                    wl = w.lower()
+                    if host == wl or host.endswith("." + wl):
+                        hit = wl
+                        break
+                if hit:
+                    licensed_op_links.add(hit)
+                elif host.endswith(".bet.br"):
+                    # Any .bet.br host is licensed by registro.br policy.
+                    licensed_op_links.add(host)
+
             return {
                 "final_url": str(r.url),
                 "status_code": r.status_code,
@@ -486,6 +540,8 @@ async def fetch_site(domain: str, client: httpx.AsyncClient) -> Dict[str, Any]:
                 "fingerprints": fingerprints,
                 "cnpj_hits": list(set(cnpj_hits)),
                 "content_length": len(html),
+                "affiliate_markers": affiliate_markers[:15],
+                "licensed_op_links": sorted(licensed_op_links)[:25],
                 "ok": True,
             }
         except httpx.ConnectError:
@@ -669,6 +725,54 @@ def score_risk(record: Dict[str, Any]) -> (int, str, List[str]):
         elif any(k in title_lower for k in ("aposta", "bet", "jogo")):
             score += 10
             reasons.append("Betting-related page title")
+
+    # ---- Affiliate / tipster detection ----
+    # Affiliate sites use the same vocabulary as operators and reference
+    # the same brands, so the per-signal scoring naturally pushes them
+    # toward high_risk. But affiliates are not themselves illegal
+    # operators — they monetize by sending traffic to licensed ones.
+    # Detect and cap.
+    affiliate_markers = site.get("affiliate_markers") or []
+    licensed_op_links = site.get("licensed_op_links") or []
+    title_affiliate_hit = any(
+        m in title_lower for m in (
+            "palpite", "palpites", "prognóstico", "prognostico",
+            "tipster", "afiliad", "melhores casas", "dicas",
+        )
+    )
+    # Two-of-three rule: need at least two independent affiliate
+    # indicators so we don't downgrade an actual operator just because
+    # it happens to use the word "bônus" once in a hero banner.
+    affiliate_score = (
+        (2 if len(licensed_op_links) >= 3 else (1 if len(licensed_op_links) >= 2 else 0))
+        + (1 if len(affiliate_markers) >= 2 else 0)
+        + (1 if title_affiliate_hit else 0)
+    )
+    looks_affiliate = affiliate_score >= 2
+
+    if looks_affiliate and not licensed:
+        capped = min(score, 25)
+        detail_parts = []
+        if licensed_op_links:
+            detail_parts.append(
+                f"{len(licensed_op_links)} outbound link(s) to licensed "
+                f"operators ({', '.join(licensed_op_links[:3])}"
+                f"{'…' if len(licensed_op_links) > 3 else ''})"
+            )
+        if affiliate_markers:
+            detail_parts.append(
+                f"tipster vocabulary: {', '.join(affiliate_markers[:4])}"
+            )
+        if title_affiliate_hit:
+            detail_parts.append("affiliate keyword in page title")
+        reasons.append(
+            "Potentially affiliate / tipster site — content about gambling "
+            "that appears to refer users to licensed operators for "
+            "commission rather than being an operator itself. "
+            + "; ".join(detail_parts)
+            + f". Score capped at {capped}."
+        )
+        return capped, "potentially_affiliate", reasons
 
     score = max(0, min(100, score))
     if score >= 70:
